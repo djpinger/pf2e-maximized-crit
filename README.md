@@ -15,8 +15,7 @@ alternative-crit-damage/
 ├── module.json          # Module manifest
 ├── scripts/
 │   └── main.js         # Main module code
-├── README.md           # User documentation
-└── CLAUDE.md          # This development documentation
+└── README.md           # User documentation
 ```
 
 ## How It Works
