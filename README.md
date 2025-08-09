@@ -256,6 +256,6 @@ const isCriticalHit = attackOutcome === 'criticalSuccess';
 
 ## Support Information
 - **Created for:** Pathfinder 2e alternative critical damage house rule
-- **Author:** Generated with Claude Code
+- **Author:** Generated AI Code - Because javascript is not my thing
 - **License:** Use and modify as needed
 - **Issues:** Check console logs first, then examine item damage structure
