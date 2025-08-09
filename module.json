@@ -1,0 +1,31 @@
+{
+  "id": "alternative-crit-damage",
+  "title": "Alternative Critical Damage",
+  "description": "Changes critical hit damage calculation to roll once and add maximum die value instead of doubling",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "13"
+  },
+  "authors": [
+    {
+      "name": "Your Name"
+    }
+  ],
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "systems": ["pf2e"],
+  "relationships": {
+    "systems": [
+      {
+        "id": "pf2e",
+        "type": "system",
+        "compatibility": {}
+      }
+    ]
+  },
+  "url": "",
+  "manifest": "",
+  "download": ""
+}
