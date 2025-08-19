@@ -1,7 +1,27 @@
-# Alternative Critical Damage - Development Documentation
+# Alternative Critical Damage
+
+A Foundry VTT module for Pathfinder 2e that provides an alternative critical hit damage calculation method.
 
 ## Overview
 This Foundry VTT module for the Pathfinder 2e system changes how critical hit damage is calculated. Instead of doubling damage dice (e.g., `2d6+8` becomes `4d6+16`), it rolls dice once and adds the maximum possible die value (e.g., `2d6+8` becomes `2d6+12+16`).
+
+## Installation
+
+### Option 1: Foundry VTT Module Manager (Recommended)
+1. Open Foundry VTT and navigate to the **Setup** screen
+2. Click **Add-on Modules** 
+3. Click **Install Module**
+4. Paste this manifest URL into the **Manifest URL** field:
+   ```
+   https://github.com/djpinger/pf2e-maximized-crit/releases/latest/download/module.json
+   ```
+5. Click **Install**
+6. Enable the module in your world's **Manage Modules** settings
+
+### Option 2: Manual Installation
+1. Download the latest release from [GitHub Releases](https://github.com/djpinger/pf2e-maximized-crit/releases)
+2. Extract the zip file to your Foundry `Data/modules/` directory
+3. Enable the module in your world's **Manage Modules** settings
 
 ## Key Features
 - Adds a third "Alt Crit" button to attack roll chat cards
