@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,46 +29,25 @@ jobs:
         zip -r alternative-crit-damage.zip . -x "*.git*" "*.github*" "custom-crit-macro" "*.md" "*.zip"
 
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ steps.get_version.outputs.VERSION }}
-        draft: false
-        prerelease: false
-        body: |
-          ## Changes in v${{ steps.get_version.outputs.VERSION }}
+      run: |
+        gh release create ${{ github.ref_name }} \
+          --title "Release ${{ steps.get_version.outputs.VERSION }}" \
+          --notes "## Changes in v${{ steps.get_version.outputs.VERSION }}
           
           Enhanced alternative critical damage calculation with:
-          - Advanced weapon parsing (deadly traits, persistent damage, splash damage)
+          - Advanced weapon parsing (deadly traits, persistent damage, splash damage)  
           - Striking rune support
           - PF2e DamageRoll integration
           - Proper damage category formatting
           
           ### Installation
           Use this manifest URL in Foundry VTT's Module Manager:
-          ```
+          \`\`\`
           https://github.com/djpinger/pf2e-maximized-crit/releases/latest/download/module.json
-          ```
-
-    - name: Upload module.json
-      uses: actions/upload-release-asset@v1
+          \`\`\`" \
+          --draft=false \
+          --prerelease=false \
+          module.json \
+          alternative-crit-damage.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./module.json
-        asset_name: module.json
-        asset_content_type: application/json
-
-    - name: Upload module zip
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./alternative-crit-damage.zip
-        asset_name: alternative-crit-damage.zip
-        asset_content_type: application/zip
