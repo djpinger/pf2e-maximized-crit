@@ -8,6 +8,10 @@ This Foundry VTT module for the Pathfinder 2e system changes how critical hit da
 - Works with weapons, spells, and other damage-dealing items
 - Configurable settings for static modifier doubling
 - Compatible with PF2e's complex damage system
+- **Enhanced weapon support**: Deadly traits, persistent damage, splash damage, striking runes
+- **Damage categories**: Proper handling of persistent, precision, and splash damage
+- **PF2e DamageRoll integration**: Uses official PF2e damage rolling system
+- **Complex damage structures**: Multi-component damage with proper type handling
 
 ## File Structure
 ```
@@ -31,25 +35,40 @@ const spellButtons = html.find('button[data-action="spell-damage"]');
 ```
 
 ### 2. PF2e Damage Structure Parsing
-PF2e stores weapon damage in this format:
+PF2e stores weapon damage in complex formats that the module now fully supports:
+
+**Basic Weapon Damage:**
 ```javascript
 {
-  "dice": 2,           // Number of dice
-  "die": "d6",         // Die type
+  "dice": 2,
+  "die": "d6",
   "damageType": "piercing",
-  "modifier": 0        // Static modifier
+  "modifier": 0
 }
 ```
 
-The module converts this to: `${dice}${die}+${modifier}` (e.g., "2d6+4")
+**Advanced Weapon Features:**
+- **Striking Runes**: Separates base weapon dice from rune dice
+- **Deadly Traits**: Adds extra dice on critical hits
+- **Persistent Damage**: Handled with proper category formatting
+- **Splash Damage**: Area damage with splash category
+- **Bonus Damage**: Additional weapon-specific damage
 
 ### 3. Alternative Critical Calculation
-For each die term in the damage:
-1. Keep original dice (don't double)
-2. Add maximum possible value as a flat bonus
-3. Optionally double static modifiers based on settings
+The enhanced calculation now handles complex damage structures:
 
-Example: `1d6+4` → `1d6+6+8` (roll + max die + doubled modifier)
+**For Critical Hits:**
+1. Base weapon dice: `XdY` → `(XdY+X*Y+0)` (roll + max die value)
+2. Striking rune dice: Remain as standard rolls
+3. Deadly trait dice: Added as standard rolls on crits
+4. Persistent/Splash: Proper category formatting with brackets
+5. Static modifiers: Optionally doubled based on settings
+
+**Examples:**
+- Simple: `1d6+4` → `(1d6+6+4)[piercing]` or `(1d6+6+8)[piercing]`
+- Striking: `2d6+4` → `(1d6+6+0)[piercing],(1d6+0)[piercing]` + modifiers
+- Deadly: Adds `(1d10+0)[piercing]` for deadly-d10 weapons on crits
+- Persistent: `((0+3)[persistent])[fire]` for 3 persistent fire damage
 
 ## Code Architecture
 
@@ -61,39 +80,74 @@ Example: `1d6+4` → `1d6+6+8` (roll + max die + doubled modifier)
 - Calls damage calculation function
 
 #### `rollAlternativeCriticalDamage(item, actor, isCriticalHit)`
-- Parses weapon/spell damage structure
-- Builds alternative damage formula
-- Creates and sends damage roll to chat
+- Parses complex weapon/spell damage structures
+- Handles weapon traits, runes, and special damage types
+- Builds multi-component damage formulas with proper categories
+- Uses PF2e DamageRoll class for accurate damage handling
+- Creates and sends multiple damage rolls to chat
 
 ### Critical Code Sections
 
-#### Damage Formula Parsing
+#### Enhanced Damage Formula Creation
 ```javascript
-// Method 1: PF2e format with dice/die properties
-if (baseDamage.dice && baseDamage.die) {
-    const modifier = baseDamage.modifier || 0;
-    damageFormula = `${baseDamage.dice}${baseDamage.die}`;
-    if (modifier !== 0) {
-        damageFormula += modifier >= 0 ? `+${modifier}` : modifier;
+// Creates damage with proper PF2e formatting
+function createDamageFormula(num, die, mod, damageType, category = '') {
+    let formula = '';
+    
+    // Crit formula: dice + max die value + modifier
+    if (num && die) {
+        formula = `(${num}d${die}+${num * die}+${mod})`;
+    } else if (mod) {
+        formula = `${mod}`;
     }
-    damageType = baseDamage.damageType || 'untyped';
+    
+    // Add damage category (persistent, splash, etc.)
+    if (category !== '') {
+        formula = `((${formula})[${category}])`;
+    }
+    
+    // Add damage type
+    formula += `[${damageType || 'untyped'}]`;
+    return formula;
 }
 ```
 
-#### Alternative Critical Logic
+#### Advanced Weapon Parsing Logic
 ```javascript
-for (const term of roll.terms) {
-    if (term instanceof foundry.dice.terms.DiceTerm) {
-        // Add original dice
-        newTerms.push(term);
-        
+// Handles complex weapon features
+function parseWeaponDamage(item, isCriticalHit) {
+    const { damage, runes, traits } = item.system;
+    const formulaParts = [];
+    
+    // Base weapon dice (excluding striking runes for crit calc)
+    const baseDice = damage.dice - (runes?.striking || 0);
+    if (baseDice > 0) {
         if (isCriticalHit) {
-            // Add maximum die value
-            const maxValue = term.number * term.faces;
-            newTerms.push(new foundry.dice.terms.OperatorTerm({ operator: '+' }));
-            newTerms.push(new foundry.dice.terms.NumericTerm({ number: maxValue }));
+            formulaParts.push(createDamageFormula(baseDice, dieType, 0, damage.damageType));
+        } else {
+            formulaParts.push(createStandardDamageFormula(baseDice, dieType, 0, damage.damageType));
         }
     }
+    
+    // Striking runes (always standard rolls)
+    if (runes?.striking > 0) {
+        formulaParts.push(createStandardDamageFormula(runes.striking, dieType, 0, damage.damageType));
+    }
+    
+    // Deadly trait (extra dice on crit)
+    const deadlyTrait = traits.find(t => t.startsWith('deadly-'));
+    if (deadlyTrait && isCriticalHit) {
+        const deadlyDie = deadlyTrait.split('-d')[1];
+        formulaParts.push(createStandardDamageFormula(1, deadlyDie, 0, damage.damageType));
+    }
+    
+    // Persistent damage
+    if (damage.persistent) {
+        formulaParts.push(createDamageFormula(0, dieType, damage.persistent.number, 
+                                           damage.persistent.type, 'persistent'));
+    }
+    
+    return formulaParts.join(',');
 }
 ```
 
@@ -111,17 +165,19 @@ for (const term of roll.terms) {
 **Symptoms:** Button appears but clicking shows "No damage formula found"
 **Debug:** Look for damage structure in console logs
 **Solutions:**
-1. Add new damage parsing method for unsupported item types
-2. Check `item.system.damage` structure
-3. Verify the item actually has damage data
+1. Enhanced parsing now supports most PF2e item types automatically
+2. Check console for detailed damage structure logging
+3. Verify the item has proper PF2e damage data
+4. For custom items, ensure damage follows PF2e format standards
 
 ### Issue: Incorrect Damage Calculation
-**Symptoms:** Wrong damage formula or amounts
-**Debug:** Check console for "Formula:" output
+**Symptoms:** Wrong damage formula or amounts  
+**Debug:** Check console for "Final Formula:" output
 **Solutions:**
-1. Verify dice term parsing logic
-2. Check static modifier handling
-3. Ensure settings are applied correctly
+1. Enhanced parsing now handles weapon traits, runes, and special damage
+2. Check if weapon has deadly traits, striking runes, or persistent damage
+3. Verify damage categories are being applied correctly (persistent, splash)
+4. Ensure PF2e DamageRoll class is being used properly
 
 ## Troubleshooting Commands
 
@@ -132,11 +188,15 @@ game.settings.set('alternative-crit-damage', 'debug', true);
 
 // Inspect item damage structure
 const item = game.actors.getName("ActorName").items.getName("WeaponName");
-console.log(item.system.damage);
+console.log('Damage:', item.system.damage);
+console.log('Traits:', item.system.traits.value);
+console.log('Runes:', item.system.runes);
+console.log('Splash:', item.system.splashDamage);
+console.log('Bonus:', item.system.bonusDamage);
 
-// Test damage parsing manually
-const baseDamage = item.system.damage;
-console.log(JSON.stringify(baseDamage, null, 2));
+// Test enhanced damage parsing
+const system = item.system;
+console.log('Full system structure:', JSON.stringify(system, null, 2));
 ```
 
 ### Manual Testing
@@ -160,14 +220,23 @@ console.log(JSON.stringify(baseDamage, null, 2));
 ## Extending the Module
 
 ### Adding New Item Types
-To support new item types, add parsing methods in `rollAlternativeCriticalDamage()`:
+The enhanced system now automatically handles most PF2e item types. For truly custom items:
 
 ```javascript
-// Method N: New item type format
-if (!damageFormula && baseDamage.customProperty) {
-    damageFormula = baseDamage.customProperty;
-    damageType = baseDamage.customType || 'untyped';
-    console.log('Found damage in custom format:', damageFormula);
+// Add to parseWeaponDamage() or create new parse function
+function parseCustomItemDamage(item, isCriticalHit) {
+    const damage = item.system.customDamage;
+    if (damage && damage.dice && damage.die) {
+        const dieType = damage.die.split('d')[1];
+        if (isCriticalHit) {
+            return createDamageFormula(damage.dice, dieType, damage.modifier || 0, 
+                                     damage.damageType || 'untyped', damage.category || '');
+        } else {
+            return createStandardDamageFormula(damage.dice, dieType, damage.modifier || 0,
+                                             damage.damageType || 'untyped', damage.category || '');
+        }
+    }
+    return null;
 }
 ```
 
@@ -182,7 +251,14 @@ const hasDamageButtons = strikeButtons.length > 0 ||
 ```
 
 ### Modifying Calculation Logic
-The alternative critical calculation happens in the dice term processing loop. Modify this section to change how critical damage is calculated.
+The enhanced system uses separate functions for damage creation:
+
+- `createDamageFormula()`: For critical damage (dice + max + modifier)
+- `createStandardDamageFormula()`: For non-critical damage
+- `parseWeaponDamage()`: Handles complex weapon parsing
+- `parseSpellDamage()`: Handles spell damage structures
+
+Modify these functions to change calculation behavior.
 
 ## PF2e System Integration
 
@@ -194,7 +270,12 @@ The alternative critical calculation happens in the dice term processing loop. M
 ### PF2e-Specific Code
 - Uses `ChatMessage.getSpeaker({ actor })` for proper attribution
 - Respects `game.settings.get('core', 'rollMode')` for roll privacy
-- Integrates with PF2e's damage type system
+- **Enhanced PF2e integration**:
+  - Uses `CONFIG.Dice.rolls` to find PF2e DamageRoll class
+  - Proper damage category formatting with brackets
+  - Handles PF2e weapon traits (deadly, persistent, etc.)
+  - Supports striking runes and weapon specialization
+  - Creates multiple damage rolls for complex damage structures
 
 ### Critical Hit Detection
 ```javascript
@@ -226,10 +307,16 @@ const isCriticalHit = attackOutcome === 'criticalSuccess';
 ### Testing Checklist
 - [ ] Button appears on weapon attacks
 - [ ] Button appears on spell attacks
-- [ ] Damage calculation is correct
-- [ ] Settings are respected
+- [ ] **Enhanced damage features work**:
+  - [ ] Deadly weapons add extra dice on crits
+  - [ ] Striking runes are handled separately
+  - [ ] Persistent damage shows with [persistent] category
+  - [ ] Splash damage shows with [splash] category
+  - [ ] Multiple damage types display correctly
+- [ ] Settings are respected (static modifier doubling)
 - [ ] No console errors
 - [ ] Works with critical hits and normal attacks
+- [ ] PF2e DamageRoll integration functions properly
 
 ### Common Pitfalls
 1. **Foundry API Changes:** Keep up with deprecation warnings

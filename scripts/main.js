@@ -141,160 +141,277 @@ async function handleAlternativeCritical(message, button) {
 }
 
 /**
- * Roll alternative critical damage
+ * Get PF2e DamageRoll class
+ */
+function getDamageRollClass() {
+    return CONFIG.Dice.rolls.find((r) => r.name === 'DamageRoll');
+}
+
+/**
+ * Create a dice formula with damage type and category
+ */
+function createDamageFormula(num, die, mod, damageType, category = '') {
+    let formula = '';
+    
+    // Handle dice part
+    if (num && die) {
+        formula = `(${num}d${die}+${num * die}+${mod})`;
+    } else if (mod) {
+        formula = `${mod}`;
+    }
+    
+    // Add damage category if present
+    if (category !== '') {
+        formula = `((${formula})[${category}])`;
+    }
+    
+    // Add damage type
+    if (damageType) {
+        formula += `[${damageType}]`;
+    } else {
+        formula += `[untyped]`;
+    }
+    
+    return formula;
+}
+
+/**
+ * Create a standard dice formula (non-crit)
+ */
+function createStandardDamageFormula(num, die, mod, damageType, category = '') {
+    let formula = '';
+    
+    // Handle dice part
+    if (num && die) {
+        formula = `(${num}d${die}+${mod})`;
+    } else if (mod) {
+        formula = `${mod}`;
+    }
+    
+    // Add damage category if present
+    if (category !== '') {
+        formula = `((${formula})[${category}])`;
+    }
+    
+    // Add damage type
+    if (damageType) {
+        formula += `[${damageType}]`;
+    } else {
+        formula += `[untyped]`;
+    }
+    
+    return formula;
+}
+
+/**
+ * Parse weapon damage including runes, traits, and special damage types
+ */
+function parseWeaponDamage(item, isCriticalHit) {
+    const system = item.system;
+    const damage = system.damage;
+    const splashDamage = system.splashDamage;
+    const bonusDamage = system.bonusDamage;
+    const runes = system.runes;
+    const traits = system.traits?.value || [];
+    
+    const formulaParts = [];
+    
+    if (!damage) {
+        return null;
+    }
+    
+    console.log('Alternative Critical Damage | Weapon damage:', damage);
+    console.log('Alternative Critical Damage | Weapon traits:', traits);
+    console.log('Alternative Critical Damage | Weapon runes:', runes);
+    
+    // Handle main weapon damage
+    const dieType = damage.die ? damage.die.split('d')[1] : null;
+    if (damage.dice && dieType) {
+        // Check for deadly trait
+        const deadlyTrait = traits.find((trait) => trait.startsWith('deadly-'));
+        
+        // Calculate base dice (subtract striking runes for crit calculation)
+        const baseDice = runes ? damage.dice - (runes.striking || 0) : damage.dice;
+        
+        if (baseDice > 0) {
+            if (isCriticalHit) {
+                formulaParts.push(createDamageFormula(baseDice, dieType, 0, damage.damageType, ''));
+            } else {
+                formulaParts.push(createStandardDamageFormula(baseDice, dieType, 0, damage.damageType, ''));
+            }
+        }
+        
+        // Handle striking runes (always standard dice, not crit)
+        if (runes && runes.striking > 0) {
+            formulaParts.push(createStandardDamageFormula(runes.striking, dieType, 0, damage.damageType, ''));
+        }
+        
+        // Handle deadly trait (standard dice on crit)
+        if (deadlyTrait && isCriticalHit) {
+            const deadlyDie = deadlyTrait.split('-d')[1];
+            const deadlyDice = runes ? runes.striking || 1 : 1;
+            formulaParts.push(createStandardDamageFormula(deadlyDice, deadlyDie, 0, damage.damageType, ''));
+        }
+        
+        // Handle persistent damage
+        if (damage.persistent) {
+            if (isCriticalHit) {
+                formulaParts.push(createDamageFormula(0, dieType, damage.persistent.number, damage.persistent.type, 'persistent'));
+            } else {
+                formulaParts.push(createStandardDamageFormula(0, dieType, damage.persistent.number, damage.persistent.type, 'persistent'));
+            }
+        }
+    }
+    
+    // Handle splash damage
+    if (splashDamage && splashDamage.value > 0 && damage) {
+        if (isCriticalHit) {
+            formulaParts.push(createDamageFormula(0, 4, splashDamage.value, damage.damageType, 'splash'));
+        } else {
+            formulaParts.push(createStandardDamageFormula(0, 4, splashDamage.value, damage.damageType, 'splash'));
+        }
+    }
+    
+    // Handle bonus damage
+    if (bonusDamage && bonusDamage.value > 0 && bonusDamage.dice && bonusDamage.die) {
+        const bonusDieType = bonusDamage.die.split('d')[1];
+        formulaParts.push(createStandardDamageFormula(bonusDamage.dice, bonusDieType, 0, damage.damageType, ''));
+    }
+    
+    return formulaParts.length > 0 ? formulaParts.join(',') : null;
+}
+
+/**
+ * Parse spell damage
+ */
+function parseSpellDamage(item, isCriticalHit) {
+    const damage = item.system.damage;
+    const formulaParts = [];
+    
+    if (!damage || typeof damage !== "object" || Object.keys(damage).length === 0) {
+        return null;
+    }
+    
+    console.log('Alternative Critical Damage | Spell damage:', damage);
+    
+    // Handle spell damage instances
+    for (const [key, damageInstance] of Object.entries(damage)) {
+        if (damageInstance && damageInstance.damage) {
+            // Try to parse the damage formula
+            try {
+                const roll = new Roll(damageInstance.damage);
+                for (const term of roll.terms) {
+                    if (term instanceof foundry.dice.terms.DiceTerm) {
+                        const dieType = term.faces;
+                        const numDice = term.number;
+                        if (isCriticalHit) {
+                            formulaParts.push(createDamageFormula(numDice, dieType, 0, damageInstance.type || 'untyped', ''));
+                        } else {
+                            formulaParts.push(createStandardDamageFormula(numDice, dieType, 0, damageInstance.type || 'untyped', ''));
+                        }
+                    } else if (term instanceof foundry.dice.terms.NumericTerm) {
+                        // Handle static modifiers in spells
+                        const modifier = term.number;
+                        if (modifier !== 0) {
+                            if (isCriticalHit && game.settings.get('alternative-crit-damage', 'doubleStatic')) {
+                                formulaParts.push(createDamageFormula(0, 1, modifier * 2, damageInstance.type || 'untyped', ''));
+                            } else {
+                                formulaParts.push(createStandardDamageFormula(0, 1, modifier, damageInstance.type || 'untyped', ''));
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.warn('Alternative Critical Damage | Could not parse spell damage formula:', damageInstance.damage, error);
+                // Fall back to simple handling
+                if (isCriticalHit) {
+                    formulaParts.push(createDamageFormula(1, 6, 0, damageInstance.type || 'untyped', ''));
+                } else {
+                    formulaParts.push(createStandardDamageFormula(1, 6, 0, damageInstance.type || 'untyped', ''));
+                }
+            }
+        }
+    }
+    
+    return formulaParts.length > 0 ? formulaParts.join(',') : null;
+}
+
+/**
+ * Roll alternative critical damage with enhanced parsing
  */
 async function rollAlternativeCriticalDamage(item, actor, isCriticalHit = true) {
     console.log('Alternative Critical Damage | Item:', item.name, 'Type:', item.type);
     
-    // Get the item's base damage formula - works for weapons, spells, etc.
-    let baseDamage = item.system.damage;
     let damageFormula = null;
-    let damageType = 'untyped';
     
-    // Try multiple approaches to find damage data
-    if (baseDamage && typeof baseDamage === 'object') {
-        // Method 1: PF2e format with dice/die properties
-        if (baseDamage.dice && baseDamage.die) {
+    // Parse damage based on item type
+    if (item.type === 'weapon') {
+        damageFormula = parseWeaponDamage(item, isCriticalHit);
+    } else if (item.type === 'spell') {
+        damageFormula = parseSpellDamage(item, isCriticalHit);
+    } else {
+        // Fallback to old parsing method for other item types
+        const baseDamage = item.system.damage;
+        if (baseDamage && baseDamage.dice && baseDamage.die) {
+            const dieType = baseDamage.die.split('d')[1];
             const modifier = baseDamage.modifier || 0;
-            damageFormula = `${baseDamage.dice}${baseDamage.die}`;
-            if (modifier !== 0) {
-                damageFormula += modifier >= 0 ? `+${modifier}` : modifier;
-            }
-            damageType = baseDamage.damageType || 'untyped';
-            console.log('Alternative Critical Damage | Found damage in PF2e dice/die format:', damageFormula);
-        }
-        
-        // Method 2: PF2e weapon format - Object with damage instances
-        else if (Object.keys(baseDamage).length > 0) {
-            const firstDamageKey = Object.keys(baseDamage)[0];
-            const firstDamage = baseDamage[firstDamageKey];
-            if (firstDamage && firstDamage.damage) {
-                damageFormula = firstDamage.damage;
-                damageType = firstDamage.damageType || 'untyped';
-                console.log('Alternative Critical Damage | Found damage in weapon format:', damageFormula);
+            if (isCriticalHit) {
+                damageFormula = createDamageFormula(baseDamage.dice, dieType, modifier, baseDamage.damageType || 'untyped', '');
+            } else {
+                damageFormula = createStandardDamageFormula(baseDamage.dice, dieType, modifier, baseDamage.damageType || 'untyped', '');
             }
         }
-        
-        // Method 3: Direct formula property
-        if (!damageFormula && baseDamage.formula) {
-            damageFormula = baseDamage.formula;
-            damageType = baseDamage.damageType || 'untyped';
-            console.log('Alternative Critical Damage | Found damage in formula property:', damageFormula);
-        }
-    }
-    
-    // Method 4: Check if baseDamage is a string (direct formula)
-    if (!damageFormula && typeof baseDamage === 'string') {
-        damageFormula = baseDamage;
-        console.log('Alternative Critical Damage | Found damage as string:', damageFormula);
     }
     
     if (!damageFormula) {
         ui.notifications.warn(`No damage formula found for this ${item.type}`);
         console.log('Alternative Critical Damage | Item system structure:', item.system);
-        console.log('Alternative Critical Damage | Full damage object:', JSON.stringify(baseDamage, null, 2));
-        console.log('Alternative Critical Damage | Damage object keys:', Object.keys(baseDamage || {}));
-        
-        // Let's try a more exhaustive search
-        if (baseDamage) {
-            for (const [key, value] of Object.entries(baseDamage)) {
-                console.log(`Damage key "${key}":`, value);
-                if (value && typeof value === 'object' && value.damage) {
-                    console.log(`Found damage in key "${key}": ${value.damage}`);
-                    damageFormula = value.damage;
-                    damageType = value.damageType || 'untyped';
-                    break;
-                }
-            }
-        }
-        
-        if (!damageFormula) {
-            return;
-        }
-        console.log('Alternative Critical Damage | Using formula from exhaustive search:', damageFormula);
-    }
-    
-    const doubleStatic = game.settings.get('alternative-crit-damage', 'doubleStatic');
-    
-    // Build alternative damage formula
-    let modifierLabels = [];
-    
-    // Parse the damage formula to extract dice and modifiers
-    const roll = new Roll(damageFormula);
-    let newTerms = [];
-    let staticModifier = 0;
-    
-    for (const term of roll.terms) {
-        if (term instanceof foundry.dice.terms.DiceTerm) {
-            // Add the original dice (not doubled)
-            newTerms.push(term);
-            
-            if (isCriticalHit) {
-                // Add maximum die value as a numeric term
-                const maxValue = term.number * term.faces;
-                newTerms.push(new foundry.dice.terms.OperatorTerm({ operator: '+' }));
-                newTerms.push(new foundry.dice.terms.NumericTerm({ number: maxValue }));
-                modifierLabels.push(`Critical Max (${term.number}d${term.faces}): +${maxValue}`);
-            }
-        } else if (term instanceof foundry.dice.terms.NumericTerm) {
-            // Handle static modifiers
-            let modifierValue = term.number;
-            if (isCriticalHit && doubleStatic) {
-                modifierValue *= 2;
-                modifierLabels.push(`Doubled Modifier: +${modifierValue}`);
-            }
-            staticModifier += modifierValue;
-        } else {
-            // Keep operators and other terms
-            newTerms.push(term);
-        }
-    }
-    
-    // Add the static modifier if it exists
-    if (staticModifier !== 0) {
-        if (newTerms.length > 0) {
-            newTerms.push(new foundry.dice.terms.OperatorTerm({ operator: staticModifier >= 0 ? '+' : '-' }));
-            newTerms.push(new foundry.dice.terms.NumericTerm({ number: Math.abs(staticModifier) }));
-        } else {
-            newTerms.push(new foundry.dice.terms.NumericTerm({ number: staticModifier }));
-        }
-    }
-    
-    // Build the final alternative formula
-    const alternativeFormula = Roll.getFormula(newTerms);
-    
-    if (!alternativeFormula) {
-        ui.notifications.warn('Could not build alternative damage formula');
         return;
     }
     
-    console.log('Alternative Critical Damage | Formula:', alternativeFormula);
+    console.log('Alternative Critical Damage | Final Formula:', damageFormula);
     
-    // Create and evaluate the roll
-    const damageRoll = new Roll(alternativeFormula);
-    await damageRoll.evaluate();
+    // Use PF2e DamageRoll if available, otherwise fall back to regular Roll
+    const DamageRoll = getDamageRollClass();
     
-    // Build flavor text
-    let flavorText = `<strong>Alternative Critical Damage</strong><br>`;
-    if (isCriticalHit) {
-        flavorText += `<em>Roll once + add maximum die value</em><br>`;
-        if (modifierLabels.length > 0) {
-            flavorText += modifierLabels.join('<br>') + '<br>';
+    try {
+        // Create multiple rolls for each damage component
+        const formulaParts = damageFormula.split(',');
+        const rolls = await Promise.all(
+            formulaParts.map(formula => {
+                if (DamageRoll) {
+                    return new DamageRoll(formula, actor.getRollData()).roll();
+                } else {
+                    return new Roll(formula, actor.getRollData()).evaluate();
+                }
+            })
+        );
+        
+        // Build flavor text
+        let flavorText = `<strong>Alternative Critical Damage</strong><br>`;
+        if (isCriticalHit) {
+            flavorText += `<em>Roll once + add maximum die value</em><br>`;
+        } else {
+            flavorText += `<em>Normal damage (not a critical hit)</em><br>`;
         }
-    } else {
-        flavorText += `<em>Normal damage (not a critical hit)</em><br>`;
+        flavorText += `<strong>${item.name}</strong>`;
+        
+        // Send the rolls to chat
+        await ChatMessage.create({
+            user: game.user.id,
+            type: CONST.CHAT_MESSAGE_TYPES.ROLL,
+            rolls: rolls,
+            speaker: ChatMessage.getSpeaker({ actor: actor }),
+            flavor: flavorText,
+            rollMode: game.settings.get('core', 'rollMode')
+        });
+        
+        console.log('Alternative Critical Damage | Roll sent to chat');
+        
+    } catch (error) {
+        console.error('Alternative Critical Damage | Error creating damage roll:', error);
+        ui.notifications.error('Failed to create alternative critical damage roll');
     }
-    flavorText += `<strong>${item.name}</strong>`;
-    
-    // Send the roll to chat
-    await damageRoll.toMessage({
-        speaker: ChatMessage.getSpeaker({ actor: actor }),
-        flavor: flavorText,
-        rolls: [damageRoll],
-        rollMode: game.settings.get('core', 'rollMode')
-    });
-    
-    console.log('Alternative Critical Damage | Roll sent to chat');
 }
 
 console.log('Alternative Critical Damage | Module loaded');
