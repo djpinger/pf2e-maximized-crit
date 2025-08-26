@@ -310,38 +310,17 @@ function parseWeaponDamage(item, isCriticalHit) {
         totalModifier += weaponSystem.bonusDamage.value;
       }
 
-      // Handle weapon-specific damage bonus (this might be on the item itself)
-      if (typeof weaponSystem.bonusDamage === "number") {
-        totalModifier += weaponSystem.bonusDamage;
-      }
-
-      // Handle item-level damage bonus if it exists
-      if (typeof weaponSystem.damageBonus === "number") {
-        totalModifier += weaponSystem.damageBonus;
-      }
-
-      // Handle any flat damage bonus in the item system
-      if (typeof weaponSystem.flatBonus === "number") {
-        totalModifier += weaponSystem.flatBonus;
-      }
-
-      // Handle damage modifiers in the item's data structure more broadly
-      if (typeof weaponSystem.modifier === "number") {
-        totalModifier += weaponSystem.modifier;
-      }
-
-      // Handle any damage bonus that might be directly on the item system
+      // Handle weapon-specific bonus that might not be in standard fields
       if (typeof weaponSystem.bonus === "number") {
         totalModifier += weaponSystem.bonus;
       }
 
-      // Handle direct weapon bonus that might not be in standard fields
-      // This addresses cases where weapons have +X bonuses like "+1 Striking Rapier"
+      // Handle bonus from the item's system object directly (this could be the +1 in our case)
       if (typeof item.system.bonus === "number") {
         totalModifier += item.system.bonus;
       }
 
-      // Handle potential weapon-specific damage bonus that might be in the root system
+      // Handle any numeric bonus in the root system object
       if (typeof item.system === "object" && item.system.bonus !== undefined) {
         if (typeof item.system.bonus === "number") {
           totalModifier += item.system.bonus;
