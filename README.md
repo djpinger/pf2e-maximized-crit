@@ -1,9 +1,11 @@
 # Alternative Critical Damage
 
-A Foundry VTT module for Pathfinder 2e that provides an alternative critical hit damage calculation method.
+A Foundry VTT module for Pathfinder 2e that provides an alternative critical hit damage calculation method with intelligent damage detection.
 
 ## Overview
 This Foundry VTT module for the Pathfinder 2e system changes how critical hit damage is calculated. Instead of doubling damage dice (e.g., `2d6+8` becomes `4d6+16`), it rolls dice once and adds the maximum possible die value (e.g., `2d6+8` becomes `2d6+12+16`).
+
+**Version 1.1.8** introduces smart damage detection that captures complete PF2e damage structures, including all dynamic modifiers like class features, ensuring accurate alternative critical calculations.
 
 ## Installation
 
@@ -25,13 +27,13 @@ This Foundry VTT module for the Pathfinder 2e system changes how critical hit da
 
 ## Key Features
 - Adds a third "Alt Crit" button to attack roll chat cards
-- Works with weapons, spells, and other damage-dealing items
-- Configurable settings for static modifier doubling
-- Compatible with PF2e's complex damage system
+- **Smart damage detection**: Captures complete PF2e damage data for accurate calculations
+- **Hybrid calculation modes**: Works with or without prior damage rolls
+- **Full modifier support**: Includes all dynamic bonuses (Strength, Precise Strike, etc.)
 - **Enhanced weapon support**: Deadly traits, persistent damage, splash damage, striking runes
 - **Damage categories**: Proper handling of persistent, precision, and splash damage
 - **PF2e DamageRoll integration**: Uses official PF2e damage rolling system
-- **Complex damage structures**: Multi-component damage with proper type handling
+- **Configurable settings**: Optional static modifier doubling
 
 ## File Structure
 ```
@@ -44,51 +46,101 @@ alternative-crit-damage/
 
 ## How It Works
 
-### 1. Button Detection and Injection
-The module hooks into `renderChatMessage` to detect attack roll messages and add the "Alt Crit" button:
+The module uses a sophisticated **hybrid approach** to calculate alternative critical damage, combining smart damage detection with fallback methods for maximum compatibility.
 
+### 1. Smart Damage Detection System
+
+**Damage Roll Capture:**
+The module automatically captures PF2e damage roll data when created:
 ```javascript
-// Looks for these button types
-const strikeButtons = html.find('button[data-action="strike-damage"]');
-const damageButtons = html.find('button[data-action="damage-roll"]');
-const spellButtons = html.find('button[data-action="spell-damage"]');
+Hooks.on("createChatMessage", (message) => {
+  if (message.rolls[0]?.constructor.name === "DamageRoll") {
+    // Capture complete damage structure including:
+    // - Base weapon damage
+    // - All dynamic modifiers (Strength, Precise Strike, etc.)
+    // - Weapon traits (Deadly, Fatal, etc.)
+    // - Damage categories (precision, splash, persistent)
+  }
+});
 ```
 
-### 2. PF2e Damage Structure Parsing
-PF2e stores weapon damage in complex formats that the module now fully supports:
-
-**Basic Weapon Damage:**
+**Data Structure Captured:**
 ```javascript
 {
-  "dice": 2,
-  "die": "d6",
-  "damageType": "piercing",
-  "modifier": 0
+  base: [{ diceNumber: 2, dieSize: "d6", damageType: "piercing" }],
+  modifiers: [
+    { modifier: 1, damageCategory: null }, // Strength
+    { modifier: 3, damageCategory: "precision" } // Precise Strike
+  ],
+  dice: [
+    { diceNumber: 1, dieSize: "d8", critical: true } // Deadly d8
+  ]
 }
 ```
 
-**Advanced Weapon Features:**
-- **Striking Runes**: Separates base weapon dice from rune dice
-- **Deadly Traits**: Adds extra dice on critical hits
-- **Persistent Damage**: Handled with proper category formatting
-- **Splash Damage**: Area damage with splash category
-- **Bonus Damage**: Additional weapon-specific damage
+### 2. Hybrid Calculation Modes
 
-### 3. Alternative Critical Calculation
-The enhanced calculation now handles complex damage structures:
+**Mode A: Enhanced Accuracy (Recommended)**
+1. Make a normal damage roll first
+2. Click "Alt Crit" within 30 seconds
+3. **Result**: Perfect calculation with ALL modifiers included
 
-**For Critical Hits:**
-1. Base weapon dice: `XdY` → `(XdY+X*Y+0)` (roll + max die value)
-2. Striking rune dice: Remain as standard rolls
-3. Deadly trait dice: Added as standard rolls on crits
-4. Persistent/Splash: Proper category formatting with brackets
-5. Static modifiers: Optionally doubled based on settings
+**Mode B: Direct Calculation (Fallback)**
+1. Click "Alt Crit" directly (no prior roll needed)
+2. Uses available weapon/actor data
+3. **Result**: Good calculation with basic modifiers (may miss complex bonuses like Precise Strike)
 
-**Examples:**
-- Simple: `1d6+4` → `(1d6+6+4)[piercing]` or `(1d6+6+8)[piercing]`
-- Striking: `2d6+4` → `(1d6+6+0)[piercing],(1d6+0)[piercing]` + modifiers
-- Deadly: Adds `(1d10+0)[piercing]` for deadly-d10 weapons on crits
-- Persistent: `((0+3)[persistent])[fire]` for 3 persistent fire damage
+### 3. Alternative Critical Logic
+
+**For Alternative Critical Hits:**
+- **Base Dice**: `XdY` → `(XdY + X×Y)` (roll dice + add maximum possible value)
+- **Static Modifiers**: Optionally doubled based on settings
+- **Deadly/Fatal Traits**: Added as normal rolls on crits
+- **Precision Damage**: Properly categorized and doubled
+- **Persistent/Splash**: Correct category formatting
+
+**Example Calculation:**
+```
+Normal Crit: 2d6+1+3 → 4d6+2+6 (doubled everything)
+Alt Crit:    2d6+1+3 → (2d6+12)[piercing], 2[untyped], (6[precision])[untyped], (1d8)[piercing]
+```
+
+This gives more consistent damage while maintaining the excitement of rolling dice.
+
+## Usage Guide
+
+### Getting Started
+1. **Enable the module** in your world's Module Management settings
+2. **Make an attack roll** with any weapon or spell
+3. **Look for the "Alt Crit" button** that appears next to normal damage buttons
+4. **Click "Alt Crit"** to generate alternative critical damage
+
+### For Best Results (Recommended Workflow)
+1. **Roll attack** → Click normal **"Damage"** button
+2. **Within 30 seconds** → Click **"Alt Crit"** button  
+3. **Result**: Perfect alternative critical damage with all modifiers
+
+### Quick Usage (Acceptable Results)  
+1. **Roll attack** → Click **"Alt Crit"** directly
+2. **Result**: Good alternative critical damage (may miss some complex modifiers)
+
+### What You'll See
+**Normal Critical Damage:**
+```
+Attack: +1 Striking Rapier
+Damage: 4d6+2+6 = 24 piercing damage
+```
+
+**Alternative Critical Damage:**
+```
+Attack: +1 Striking Rapier  
+Alt Crit: (2d6+12)[piercing] + 2[untyped] + (6[precision])[untyped] + (1d8)[piercing]
+Result: 8+2+6+4 = 20 piercing damage (more consistent!)
+```
+
+### Settings
+- **Enable Alternative Critical Button**: Toggle the module on/off
+- **Double Static Modifiers**: Whether to double flat bonuses on alternative crits (default: true)
 
 ## Code Architecture
 
@@ -175,29 +227,54 @@ function parseWeaponDamage(item, isCriticalHit) {
 
 ### Issue: Button Not Appearing
 **Symptoms:** No "Alt Crit" button shows up on attack rolls
-**Debug:** Check console for "Alternative Critical Damage" messages
 **Solutions:**
-1. Verify module is enabled in Module Management
-2. Ensure attack message has an associated item (`message.item`)
-3. Check if damage buttons are being detected correctly
+1. **Check Module Status**: Verify module is enabled in Module Management
+2. **Verify PF2e System**: Module only works with Pathfinder 2e system
+3. **Attack Message**: Ensure the attack message has an associated weapon/spell item
+4. **Console Check**: Look for "Alternative Critical Damage v1.1.8" loading messages
 
-### Issue: "No damage formula found"
-**Symptoms:** Button appears but clicking shows "No damage formula found"
-**Debug:** Look for damage structure in console logs
-**Solutions:**
-1. Enhanced parsing now supports most PF2e item types automatically
-2. Check console for detailed damage structure logging
-3. Verify the item has proper PF2e damage data
-4. For custom items, ensure damage follows PF2e format standards
+### Issue: Missing Modifiers (Like Precise Strike)
+**Symptoms:** Alt Crit shows basic damage but missing class feature bonuses
+**Recommended Solution:**
+1. **Make normal damage roll first** (click regular "Damage" button)
+2. **Then click "Alt Crit"** within 30 seconds
+3. This captures ALL modifiers including complex ones like Precise Strike
 
-### Issue: Incorrect Damage Calculation
-**Symptoms:** Wrong damage formula or amounts  
-**Debug:** Check console for "Final Formula:" output
+**Alternative (Partial Results):**
+- Click "Alt Crit" directly without prior roll
+- Will include basic modifiers but may miss complex class features
+- Note appears in chat message indicating potential missing modifiers
+
+### Issue: "No recent damage data found" 
+**Symptoms:** Always falls back to legacy method
+**Debug Steps:**
+1. Check console for "Capturing damage roll data" messages
+2. Verify item IDs match between normal roll and Alt Crit
+3. Ensure clicking Alt Crit within 30 seconds of normal damage roll
+
 **Solutions:**
-1. Enhanced parsing now handles weapon traits, runes, and special damage
-2. Check if weapon has deadly traits, striking runes, or persistent damage
-3. Verify damage categories are being applied correctly (persistent, splash)
-4. Ensure PF2e DamageRoll class is being used properly
+1. Make sure you're clicking the damage button (not just attack)
+2. Try clicking Alt Crit immediately after damage roll
+3. Check console for detailed matching logic
+
+### Issue: Calculation Seems Wrong
+**Symptoms:** Damage amounts don't match expectations
+**Understanding the Formula:**
+- **Base Dice**: `2d6` becomes `(2d6+12)` (roll + max value 12)  
+- **Modifiers**: Doubled if "Double Static Modifiers" setting is enabled
+- **Deadly Traits**: Added as normal rolls (not maximized)
+- **Categories**: Precision damage properly labeled with `[precision]`
+
+**Debug Console Commands:**
+```javascript
+// Check what data was captured from your last damage roll
+console.log(lastDamageRollData);
+
+// Inspect your weapon's damage structure  
+const weapon = game.actors.getName("YourActor").items.getName("YourWeapon");
+console.log("Weapon damage:", weapon.system.damage);
+console.log("Weapon traits:", weapon.system.traits.value);
+```
 
 ## Troubleshooting Commands
 
