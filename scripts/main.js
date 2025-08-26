@@ -268,63 +268,6 @@ function parseWeaponDamage(item, isCriticalHit) {
       totalModifier += splashDamage.value;
     }
 
-    // Handle PF2e-specific damage modifiers that might not be in simple fields
-    // Try to capture all potential bonus sources from the weapon system
-    if (item.system) {
-      const weaponSystem = item.system;
-
-      // Look for various bonus fields that might contain damage modifiers
-      if (
-        typeof weaponSystem.bonus === "object" &&
-        weaponSystem.bonus !== null
-      ) {
-        // Handle flat damage bonuses in the bonus object
-        if (typeof weaponSystem.bonus.damage === "number") {
-          totalModifier += weaponSystem.bonus.damage;
-        }
-
-        // Handle any bonus modifiers in the bonus object
-        if (typeof weaponSystem.bonus.flat === "number") {
-          totalModifier += weaponSystem.bonus.flat;
-        }
-      }
-
-      // Look for flat damage bonuses in the system structure
-      if (typeof weaponSystem.flatDamageBonus === "number") {
-        totalModifier += weaponSystem.flatDamageBonus;
-      }
-
-      // Look for damage bonuses in the main damage object
-      if (
-        typeof weaponSystem.damage === "object" &&
-        weaponSystem.damage.bonus !== undefined
-      ) {
-        totalModifier += weaponSystem.damage.bonus;
-      }
-
-      // Look for bonus damage in the system structure
-      if (
-        typeof weaponSystem.bonusDamage === "object" &&
-        weaponSystem.bonusDamage.value !== undefined
-      ) {
-        totalModifier += weaponSystem.bonusDamage.value;
-      }
-
-      // Handle any modifiers that might be in the item's damage structure directly
-      if (item.system && item.system.damage) {
-        const weaponDamage = item.system.damage;
-        if (typeof weaponDamage === "object") {
-          // Look for any additional numeric modifiers that might not be captured elsewhere
-          if (
-            weaponDamage.modifier !== undefined &&
-            weaponDamage.modifier !== null
-          ) {
-            totalModifier += weaponDamage.modifier;
-          }
-        }
-      }
-    }
-
     // Handle PF2e-specific damage modifiers that may not be in simple fields
     // Try to capture all potential bonus sources from the weapon system
     if (item.system) {
@@ -366,6 +309,36 @@ function parseWeaponDamage(item, isCriticalHit) {
       ) {
         totalModifier += weaponSystem.bonusDamage.value;
       }
+
+      // Handle weapon-specific damage bonus (this might be on the item itself)
+      if (typeof weaponSystem.bonusDamage === "number") {
+        totalModifier += weaponSystem.bonusDamage;
+      }
+
+      // Handle item-level damage bonus if it exists
+      if (typeof weaponSystem.damageBonus === "number") {
+        totalModifier += weaponSystem.damageBonus;
+      }
+
+      // Handle any flat damage bonus in the item system
+      if (typeof weaponSystem.flatBonus === "number") {
+        totalModifier += weaponSystem.flatBonus;
+      }
+
+      // Handle damage modifiers in the item's data structure more broadly
+      if (typeof weaponSystem.modifier === "number") {
+        totalModifier += weaponSystem.modifier;
+      }
+
+      // Handle any damage bonus that might be directly on the item system
+      if (typeof weaponSystem.bonus === "number") {
+        totalModifier += weaponSystem.bonus;
+      }
+
+      // Handle direct bonus field that might contain weapon-specific bonuses (like +1 from "+1 Striking Rapier")
+      if (typeof item.system.bonus === "number") {
+        totalModifier += item.system.bonus;
+      }
     }
 
     // Handle any modifiers that might be in the item's damage structure directly
@@ -380,6 +353,25 @@ function parseWeaponDamage(item, isCriticalHit) {
           totalModifier += weaponDamage.modifier;
         }
       }
+    }
+
+    // Handle additional potential sources of damage modifiers specific to PF2E
+    // Look for damage bonuses in the weapon's properties or traits that might not be in standard fields
+    if (item.system && item.system.properties) {
+      const properties = item.system.properties;
+      if (Array.isArray(properties)) {
+        // Check for any damage bonus properties
+        properties.forEach((property) => {
+          if (typeof property === "object" && property.bonus) {
+            totalModifier += property.bonus;
+          }
+        });
+      }
+    }
+
+    // Handle potential bonus in item's system that might not be in standard fields
+    if (item.system && typeof item.system.bonus === "number") {
+      totalModifier += item.system.bonus;
     }
 
     // For critical hits, create a single proper damage formula that includes:
