@@ -242,8 +242,7 @@ function parseWeaponDamage(item, isCriticalHit) {
   // Handle main weapon damage
   const dieType = damage.die ? damage.die.split("d")[1] : null;
   if (damage.dice && dieType) {
-    // For PF2e weapon damage, we should treat the entire damage as one unit
-    // The logic is: base damage + max die value + all modifiers (including runes)
+    // For PF2e weapon damage, calculate the proper formula with all components in one
     let formula = "";
 
     // Get all modifiers from various sources - we'll handle them as one unit
@@ -269,19 +268,39 @@ function parseWeaponDamage(item, isCriticalHit) {
       totalModifier += splashDamage.value;
     }
 
-    // For critical hits, we want the formula to be:
-    // (dice)d(dieType) + maxDieValue + totalModifier
+    // For critical hits, create a single proper damage formula that includes:
+    // 1. All weapon dice (base + runes)
+    // 2. Max die value for all dice
+    // 3. All modifiers (including runes and traits)
     if (isCriticalHit) {
-      const maxDieValue = damage.dice * parseInt(dieType);
+      // Calculate total dice: base dice + any runes that add additional dice
+      let totalDice = damage.dice;
+
+      // Add striking runes to the total dice count (they add additional dice)
+      // This fix ensures proper detection and handling of runes
+      if (runes && typeof runes.striking === "number" && runes.striking > 0) {
+        console.log(
+          "Alternative Critical Damage | Adding runes to total dice:",
+          runes.striking,
+        );
+        totalDice += runes.striking;
+      }
+
+      // Create the main damage formula with all components in one proper PF2e format
+      const maxDieValue = totalDice * parseInt(dieType);
       formula = createDamageFormula(
-        damage.dice,
+        totalDice,
         dieType,
         totalModifier,
         damage.damageType,
         "",
       );
+
+      // For deadly weapons, the extra damage is handled by the PF2e system
+      // Our formula above should include all dice and modifiers properly
     } else {
       // Create normal damage formula (no crit modification)
+      const maxDieValue = damage.dice * parseInt(dieType);
       formula = createStandardDamageFormula(
         damage.dice,
         dieType,
@@ -291,48 +310,7 @@ function parseWeaponDamage(item, isCriticalHit) {
       );
     }
 
-    // Handle striking runes (they don't change the crit calculation but are part of total damage)
-    if (runes && runes.striking > 0) {
-      // For striking runes, we should include them in the base calculation if they're part of the weapon's damage
-      // But for now, we'll treat them as part of the base formula to maintain compatibility with existing logic
-      // The actual PF2e system should handle rune damage correctly in the total calculation
-      // This approach maintains backward compatibility while not creating separate rolls
-      // For simplicity, we'll just use the main formula and let PF2e handle runes properly
-    }
-
-    // Handle deadly trait (standard dice on crit)
-    const deadlyTrait = traits.find((trait) => trait.startsWith("deadly-"));
-    if (deadlyTrait && isCriticalHit) {
-      const deadlyDie = deadlyTrait.split("-d")[1];
-      // For deadly weapons, we just add the extra damage component as part of the same formula
-      // But in PF2e system, we should handle this more carefully - let's keep the approach simple for now
-      // and just return our main formula to prevent multiple rolls
-
-      // The existing logic would have created another component, but we want to avoid that
-    }
-
-    // Handle persistent damage (if any) - this should be part of the main formula or handled differently
-    if (damage.persistent && damage.persistent.number) {
-      // Persistent damage is usually handled as a separate damage type in PF2e
-      // We should not create multiple rolls but instead integrate it properly
-    }
-
-    // Handle splash damage (if any) - same as above
-    if (splashDamage && splashDamage.value > 0) {
-      // Splash damage should be handled in the main formula or as part of damage category
-    }
-
-    // Handle bonus damage (if any) - same as above
-    if (
-      bonusDamage &&
-      bonusDamage.value > 0 &&
-      bonusDamage.dice &&
-      bonusDamage.die
-    ) {
-      // Bonus damage should be included in the total modifier or as part of the main formula
-    }
-
-    // Return just the main formula to avoid creating multiple separate rolls
+    // Return just the single formula to avoid creating multiple separate rolls
     return formula || null;
   }
 
