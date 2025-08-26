@@ -335,9 +335,17 @@ function parseWeaponDamage(item, isCriticalHit) {
         totalModifier += weaponSystem.bonus;
       }
 
-      // Handle direct bonus field that might contain weapon-specific bonuses (like +1 from "+1 Striking Rapier")
+      // Handle direct weapon bonus that might not be in standard fields
+      // This addresses cases where weapons have +X bonuses like "+1 Striking Rapier"
       if (typeof item.system.bonus === "number") {
         totalModifier += item.system.bonus;
+      }
+
+      // Handle potential weapon-specific damage bonus that might be in the root system
+      if (typeof item.system === "object" && item.system.bonus !== undefined) {
+        if (typeof item.system.bonus === "number") {
+          totalModifier += item.system.bonus;
+        }
       }
     }
 
