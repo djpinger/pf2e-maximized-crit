@@ -214,8 +214,6 @@ function parseWeaponDamage(item, isCriticalHit) {
     const runes = system.runes;
     const traits = system.traits?.value || [];
     
-    const formulaParts = [];
-    
     if (!damage) {
         return null;
     }
@@ -227,58 +225,112 @@ function parseWeaponDamage(item, isCriticalHit) {
     // Handle main weapon damage
     const dieType = damage.die ? damage.die.split('d')[1] : null;
     if (damage.dice && dieType) {
-        // Check for deadly trait
-        const deadlyTrait = traits.find((trait) => trait.startsWith('deadly-'));
-        
         // Calculate base dice (subtract striking runes for crit calculation)
         const baseDice = runes ? damage.dice - (runes.striking || 0) : damage.dice;
         
+        // Get all modifiers from various sources
+        let totalModifier = 0;
+        
+        // Handle static modifiers (this is where strength and precision come from)
+        if (damage.modifier !== undefined) {
+            totalModifier += damage.modifier;
+        }
+        
+        // Handle bonus damage modifiers (if any)
+        if (bonusDamage && bonusDamage.value) {
+            totalModifier += bonusDamage.value;
+        }
+        
+        // Handle persistent damage modifiers (if any)
+        if (damage.persistent && damage.persistent.number) {
+            totalModifier += damage.persistent.number;
+        }
+        
+        // Handle splash damage modifiers (if any)
+        if (splashDamage && splashDamage.value) {
+            totalModifier += splashDamage.value;
+        }
+        
+        // For critical hits, we want the formula to be:
+        // (baseDice)d(dieType) + maxDieValue + totalModifier
+        let formula = '';
+        
         if (baseDice > 0) {
+            const maxDieValue = baseDice * parseInt(dieType);
             if (isCriticalHit) {
-                formulaParts.push(createDamageFormula(baseDice, dieType, 0, damage.damageType, ''));
+                // Create the main damage formula with critical calculation
+                formula = createDamageFormula(baseDice, dieType, totalModifier, damage.damageType, '');
             } else {
-                formulaParts.push(createStandardDamageFormula(baseDice, dieType, 0, damage.damageType, ''));
+                // Create normal damage formula
+                formula = createStandardDamageFormula(baseDice, dieType, totalModifier, damage.damageType, '');
+            }
+        } else if (totalModifier !== 0) {
+            // Handle case where there's only static modifiers
+            if (isCriticalHit && game.settings.get('alternative-crit-damage', 'doubleStatic')) {
+                formula = createDamageFormula(0, 1, totalModifier * 2, damage.damageType, '');
+            } else {
+                formula = createStandardDamageFormula(0, 1, totalModifier, damage.damageType, '');
             }
         }
         
-        // Handle striking runes (always standard dice, not crit)
+        // Handle striking runes (always standard rolls)
         if (runes && runes.striking > 0) {
-            formulaParts.push(createStandardDamageFormula(runes.striking, dieType, 0, damage.damageType, ''));
+            const runeFormula = createStandardDamageFormula(runes.striking, dieType, 0, damage.damageType, '');
+            if (formula) {
+                formula += ',' + runeFormula;
+            } else {
+                formula = runeFormula;
+            }
         }
         
         // Handle deadly trait (standard dice on crit)
+        const deadlyTrait = traits.find((trait) => trait.startsWith('deadly-'));
         if (deadlyTrait && isCriticalHit) {
             const deadlyDie = deadlyTrait.split('-d')[1];
-            const deadlyDice = runes ? runes.striking || 1 : 1;
-            formulaParts.push(createStandardDamageFormula(deadlyDice, deadlyDie, 0, damage.damageType, ''));
-        }
-        
-        // Handle persistent damage
-        if (damage.persistent) {
-            if (isCriticalHit) {
-                formulaParts.push(createDamageFormula(0, dieType, damage.persistent.number, damage.persistent.type, 'persistent'));
+            const deadlyDice = 1; // Always one die for deadly
+            const deadlyFormula = createStandardDamageFormula(deadlyDice, deadlyDie, 0, damage.damageType, '');
+            if (formula) {
+                formula += ',' + deadlyFormula;
             } else {
-                formulaParts.push(createStandardDamageFormula(0, dieType, damage.persistent.number, damage.persistent.type, 'persistent'));
+                formula = deadlyFormula;
             }
         }
-    }
-    
-    // Handle splash damage
-    if (splashDamage && splashDamage.value > 0 && damage) {
-        if (isCriticalHit) {
-            formulaParts.push(createDamageFormula(0, 4, splashDamage.value, damage.damageType, 'splash'));
-        } else {
-            formulaParts.push(createStandardDamageFormula(0, 4, splashDamage.value, damage.damageType, 'splash'));
+        
+        // Handle persistent damage (if any)
+        if (damage.persistent && damage.persistent.number) {
+            const persistentFormula = createDamageFormula(0, dieType, damage.persistent.number, damage.persistent.type, 'persistent');
+            if (formula) {
+                formula += ',' + persistentFormula;
+            } else {
+                formula = persistentFormula;
+            }
         }
+        
+        // Handle splash damage (if any)
+        if (splashDamage && splashDamage.value > 0) {
+            const splashFormula = createDamageFormula(0, 4, splashDamage.value, damage.damageType, 'splash');
+            if (formula) {
+                formula += ',' + splashFormula;
+            } else {
+                formula = splashFormula;
+            }
+        }
+        
+        // Handle bonus damage (if any)
+        if (bonusDamage && bonusDamage.value > 0 && bonusDamage.dice && bonusDamage.die) {
+            const bonusDieType = bonusDamage.die.split('d')[1];
+            const bonusFormula = createStandardDamageFormula(bonusDamage.dice, bonusDieType, 0, damage.damageType, '');
+            if (formula) {
+                formula += ',' + bonusFormula;
+            } else {
+                formula = bonusFormula;
+            }
+        }
+        
+        return formula || null;
     }
     
-    // Handle bonus damage
-    if (bonusDamage && bonusDamage.value > 0 && bonusDamage.dice && bonusDamage.die) {
-        const bonusDieType = bonusDamage.die.split('d')[1];
-        formulaParts.push(createStandardDamageFormula(bonusDamage.dice, bonusDieType, 0, damage.damageType, ''));
-    }
-    
-    return formulaParts.length > 0 ? formulaParts.join(',') : null;
+    return null;
 }
 
 /**
