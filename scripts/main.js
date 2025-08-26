@@ -5,8 +5,10 @@
  * Example: 1d6+4 crit becomes 1d6+6+4*2 (roll + max die + doubled static)
  */
 
+const MODULE_VERSION = "v1.1.8";
+
 Hooks.once("init", function () {
-  console.log("Alternative Critical Damage | Initializing...");
+  console.log(`Alternative Critical Damage ${MODULE_VERSION} | Initializing...`);
 
   // Register module settings
   game.settings.register("alternative-crit-damage", "enabled", {
@@ -29,14 +31,46 @@ Hooks.once("init", function () {
 });
 
 Hooks.once("ready", function () {
-  console.log("Alternative Critical Damage | Ready");
+  console.log(`Alternative Critical Damage ${MODULE_VERSION} | Ready`);
 
   // Only work with PF2e system
   if (game.system.id !== "pf2e") {
     console.warn(
-      "Alternative Critical Damage | This module is designed for the PF2e system only",
+      `Alternative Critical Damage ${MODULE_VERSION} | This module is designed for the PF2e system only`,
     );
     return;
+  }
+});
+
+// Global storage for the last damage roll data
+let lastDamageRollData = null;
+
+// Hook to capture damage roll data when created
+Hooks.on("createChatMessage", (message) => {
+  if (message.rolls && message.rolls.length > 0) {
+    const roll = message.rolls[0];
+    if (roll.constructor.name === "DamageRoll") {
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Capturing damage roll data:`, roll);
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Message item:`, message.item);
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Message item ID:`, message.item?.id);
+
+      lastDamageRollData = {
+        roll: roll,
+        message: message,
+        timestamp: Date.now()
+      };
+
+      // Log the structure we're interested in
+      if (roll.options && roll.options.damage) {
+        console.log(`Alternative Critical Damage ${MODULE_VERSION} | Damage roll options:`, roll.options.damage);
+        if (roll.options.damage.damage) {
+          console.log(`Alternative Critical Damage ${MODULE_VERSION} | Damage structure:`, roll.options.damage.damage);
+          console.log(`Alternative Critical Damage ${MODULE_VERSION} | Base damage:`, roll.options.damage.damage.base);
+          console.log(`Alternative Critical Damage ${MODULE_VERSION} | Modifiers:`, roll.options.damage.damage.modifiers);
+          console.log(`Alternative Critical Damage ${MODULE_VERSION} | Dice:`, roll.options.damage.damage.dice);
+        }
+      }
+    }
   }
 });
 
@@ -117,7 +151,7 @@ Hooks.on("renderChatMessage", (message, html, data) => {
     buttonContainer.append(alternativeButton);
   } catch (error) {
     console.error(
-      "Alternative Critical Damage | Error in renderChatMessage hook:",
+      `Alternative Critical Damage ${MODULE_VERSION} | Error in renderChatMessage hook:`,
       error,
     );
   }
@@ -133,24 +167,24 @@ async function handleAlternativeCritical(message, button) {
 
     if (!item || !actor) {
       ui.notifications.warn(
-        "Alternative Critical Damage | No weapon found for damage roll",
+        `Alternative Critical Damage ${MODULE_VERSION} | No weapon found for damage roll`,
       );
       return;
     }
 
     console.log(
-      "Alternative Critical Damage | Rolling alternative critical damage",
+      `Alternative Critical Damage ${MODULE_VERSION} | Rolling alternative critical damage`,
     );
 
     // Get the attack roll outcome to determine if it was actually a critical
     const attackOutcome = message.flags?.pf2e?.context?.outcome;
     const isCriticalHit = attackOutcome === "criticalSuccess";
 
-    // Build damage roll with our custom calculation
-    await rollAlternativeCriticalDamage(item, actor, isCriticalHit);
+    // Build damage roll using PF2e's DamageRoll structure
+    await rollAlternativeCriticalDamageFromPF2eData(item, actor, isCriticalHit);
   } catch (error) {
     console.error(
-      "Alternative Critical Damage | Error rolling alternative critical:",
+      `Alternative Critical Damage ${MODULE_VERSION} | Error rolling alternative critical:`,
       error,
     );
     ui.notifications.error("Failed to roll alternative critical damage");
@@ -162,6 +196,290 @@ async function handleAlternativeCritical(message, button) {
  */
 function getDamageRollClass() {
   return CONFIG.Dice.rolls.find((r) => r.name === "DamageRoll");
+}
+
+/**
+ * Create alternative critical damage using captured damage roll data
+ */
+async function rollAlternativeCriticalDamageFromPF2eData(item, actor, isCriticalHit) {
+  console.log(`Alternative Critical Damage ${MODULE_VERSION} | Getting PF2e damage data for:`, item.name);
+
+  try {
+    // Check if we have recent damage roll data from the same item
+    console.log(`Alternative Critical Damage ${MODULE_VERSION} | Checking for recent damage data...`);
+    console.log(`Alternative Critical Damage ${MODULE_VERSION} | Current item ID:`, item.id);
+    console.log(`Alternative Critical Damage ${MODULE_VERSION} | Last damage data exists:`, !!lastDamageRollData);
+    if (lastDamageRollData) {
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Last damage item ID:`, lastDamageRollData.message.item?.id);
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Time since last roll:`, Date.now() - lastDamageRollData.timestamp, 'ms');
+    }
+
+    if (lastDamageRollData &&
+      lastDamageRollData.message.item &&
+      lastDamageRollData.message.item.id === item.id &&
+      (Date.now() - lastDamageRollData.timestamp) < 30000) { // Within 30 seconds
+
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Using captured damage roll data`);
+
+      const damageData = lastDamageRollData.roll.options?.damage?.damage;
+      if (damageData) {
+        console.log(`Alternative Critical Damage ${MODULE_VERSION} | Found damage data from recent roll`);
+
+        // Use the captured data to create alternative critical damage
+        const altCritFormula = await createAlternativeCriticalFormula(damageData, isCriticalHit);
+
+        console.log(`Alternative Critical Damage ${MODULE_VERSION} | Alternative formula:`, altCritFormula);
+
+        // Create and roll the alternative damage
+        const DamageRoll = getDamageRollClass();
+        const roll = new DamageRoll(altCritFormula, actor.getRollData());
+        await roll.evaluate();
+
+        // Build flavor text
+        let flavorText = `<strong>Alternative Critical Damage</strong><br>`;
+        if (isCriticalHit) {
+          flavorText += `<em>Roll once + add maximum die value</em><br>`;
+        } else {
+          flavorText += `<em>Normal damage (not a critical hit)</em><br>`;
+        }
+        flavorText += `<strong>${item.name}</strong>`;
+
+        // Send the roll to chat
+        await ChatMessage.create({
+          user: game.user.id,
+          type: CONST.CHAT_MESSAGE_TYPES.ROLL,
+          rolls: [roll],
+          speaker: ChatMessage.getSpeaker({ actor: actor }),
+          flavor: flavorText,
+          rollMode: game.settings.get("core", "rollMode"),
+        });
+
+        console.log(`Alternative Critical Damage ${MODULE_VERSION} | Alternative critical damage sent to chat`);
+        return;
+      }
+    }
+
+    // No recent damage data found, try to calculate damage modifiers directly
+    console.log(`Alternative Critical Damage ${MODULE_VERSION} | No recent damage data found, attempting direct calculation`);
+    await attemptDirectDamageCalculation(item, actor, isCriticalHit);
+
+  } catch (error) {
+    console.error(`Alternative Critical Damage ${MODULE_VERSION} | Error in PF2e damage calculation:`, error);
+    await rollAlternativeCriticalDamageLegacy(item, actor, isCriticalHit);
+  }
+}
+
+/**
+ * Create alternative critical damage formula from PF2e damage data
+ */
+async function createAlternativeCriticalFormula(damageData, isCriticalHit) {
+  const formulaParts = [];
+
+  // Handle base weapon damage (the main dice)
+  if (damageData.base && damageData.base.length > 0) {
+    for (const baseDamage of damageData.base) {
+      const { diceNumber, dieSize, modifier, damageType, category } = baseDamage;
+
+      if (diceNumber && dieSize) {
+        const dieValue = parseInt(dieSize.replace('d', ''));
+        if (isCriticalHit) {
+          // Alternative crit: roll dice + add max die value + modifier
+          let formula = `(${diceNumber}${dieSize}+${diceNumber * dieValue}`;
+          if (modifier) formula += `+${modifier}`;
+          formula += `)`;
+
+          // Add damage type
+          formula += `[${damageType || 'untyped'}]`;
+          formulaParts.push(formula);
+        } else {
+          // Normal damage: just roll dice + modifier
+          let formula = `(${diceNumber}${dieSize}`;
+          if (modifier) formula += `+${modifier}`;
+          formula += `)`;
+
+          // Add damage type
+          formula += `[${damageType || 'untyped'}]`;
+          formulaParts.push(formula);
+        }
+      }
+    }
+  }
+
+  // Handle modifiers (like Strength, Precise Strike, etc.)
+  if (damageData.modifiers && damageData.modifiers.length > 0) {
+    for (const modifierData of damageData.modifiers) {
+      if (modifierData.enabled && !modifierData.ignored && modifierData.modifier) {
+        const { modifier, damageCategory, damageType } = modifierData;
+
+        let modifierValue = modifier;
+        if (isCriticalHit && game.settings.get("alternative-crit-damage", "doubleStatic")) {
+          // Double static modifiers on crits if setting is enabled
+          modifierValue *= 2;
+        }
+
+        let formula = `${modifierValue}`;
+
+        // Add category if present (like precision)
+        if (damageCategory) {
+          formula = `(${formula}[${damageCategory}])`;
+        }
+
+        // Add damage type if specified
+        if (damageType) {
+          formula += `[${damageType}]`;
+        } else {
+          formula += `[untyped]`;
+        }
+
+        formulaParts.push(formula);
+      }
+    }
+  }
+
+  // Handle additional dice (like deadly trait)
+  if (damageData.dice && damageData.dice.length > 0) {
+    for (const diceData of damageData.dice) {
+      if (diceData.enabled && !diceData.ignored) {
+        // Only add deadly/fatal dice on critical hits
+        if (diceData.critical === true && isCriticalHit) {
+          const { diceNumber, dieSize, damageType, category } = diceData;
+
+          if (diceNumber && dieSize) {
+            let formula = `(${diceNumber}${dieSize})`;
+
+            // Add category if present
+            if (category) {
+              formula = `(${formula}[${category}])`;
+            }
+
+            // Add damage type
+            formula += `[${damageType || 'untyped'}]`;
+            formulaParts.push(formula);
+          }
+        }
+      }
+    }
+  }
+
+  if (formulaParts.length === 0) {
+    throw new Error("No damage components found");
+  }
+
+  return `{${formulaParts.join(',')}}`;
+}
+
+/**
+ * Attempt to calculate damage directly without needing a prior roll
+ */
+async function attemptDirectDamageCalculation(item, actor, isCriticalHit) {
+  console.log(`Alternative Critical Damage ${MODULE_VERSION} | Attempting direct damage calculation`);
+  
+  try {
+    // Build a synthetic damage structure based on what we can determine
+    const syntheticDamageData = {
+      base: [],
+      modifiers: [],
+      dice: []
+    };
+    
+    // Get base weapon damage
+    const baseDamage = item.system.damage;
+    if (baseDamage && baseDamage.dice && baseDamage.die) {
+      const dieValue = parseInt(baseDamage.die.replace('d', ''));
+      syntheticDamageData.base.push({
+        diceNumber: baseDamage.dice,
+        dieSize: baseDamage.die,
+        modifier: baseDamage.modifier || 0,
+        damageType: baseDamage.damageType || 'untyped'
+      });
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Added base damage:`, syntheticDamageData.base[0]);
+    }
+    
+    // Try to get strength modifier for melee weapons
+    if (item.type === "weapon" && item.system.category !== "unarmed" && actor) {
+      const strMod = actor.system?.abilities?.str?.mod || 0;
+      if (strMod > 0) {
+        syntheticDamageData.modifiers.push({
+          enabled: true,
+          ignored: false,
+          modifier: strMod,
+          damageCategory: null,
+          damageType: null
+        });
+        console.log(`Alternative Critical Damage ${MODULE_VERSION} | Added strength modifier:`, strMod);
+      }
+    }
+    
+    // Try to find weapon specialization or other flat bonuses
+    // This is more complex and would require deeper PF2e knowledge
+    if (actor && actor.system) {
+      // Look for damage bonuses in the actor's system
+      // This is a placeholder - we'd need to dig into PF2e's modifier system
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Actor system available for bonus calculation`);
+    }
+    
+    // Handle weapon traits like deadly
+    const traits = item.system.traits?.value || [];
+    for (const trait of traits) {
+      if (trait.startsWith('deadly-')) {
+        const deadlyDie = trait.replace('deadly-', '');
+        syntheticDamageData.dice.push({
+          enabled: true,
+          ignored: false,
+          critical: true,
+          diceNumber: 1,
+          dieSize: deadlyDie,
+          damageType: baseDamage.damageType || 'untyped',
+          category: null
+        });
+        console.log(`Alternative Critical Damage ${MODULE_VERSION} | Added deadly trait:`, trait);
+      }
+    }
+    
+    // If we have some damage data, use it
+    if (syntheticDamageData.base.length > 0) {
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Using synthetic damage data:`, syntheticDamageData);
+      
+      const altCritFormula = await createAlternativeCriticalFormula(syntheticDamageData, isCriticalHit);
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Direct calculation formula:`, altCritFormula);
+      
+      // Create and roll the alternative damage
+      const DamageRoll = getDamageRollClass();
+      const roll = new DamageRoll(altCritFormula, actor.getRollData());
+      await roll.evaluate();
+      
+      // Build flavor text
+      let flavorText = `<strong>Alternative Critical Damage</strong><br>`;
+      if (isCriticalHit) {
+        flavorText += `<em>Roll once + add maximum die value</em><br>`;
+      } else {
+        flavorText += `<em>Normal damage (not a critical hit)</em><br>`;
+      }
+      flavorText += `<strong>${item.name}</strong><br>`;
+      flavorText += `<em>Note: Some modifiers may be missing without a prior damage roll</em>`;
+      
+      // Send the roll to chat
+      await ChatMessage.create({
+        user: game.user.id,
+        type: CONST.CHAT_MESSAGE_TYPES.ROLL,
+        rolls: [roll],
+        speaker: ChatMessage.getSpeaker({ actor: actor }),
+        flavor: flavorText,
+        rollMode: game.settings.get("core", "rollMode"),
+      });
+      
+      console.log(`Alternative Critical Damage ${MODULE_VERSION} | Direct calculation damage sent to chat`);
+      return;
+    }
+    
+    // Fall back to legacy method if we couldn't build synthetic data
+    console.log(`Alternative Critical Damage ${MODULE_VERSION} | Direct calculation failed, falling back to legacy method`);
+    await rollAlternativeCriticalDamageLegacy(item, actor, isCriticalHit);
+    
+  } catch (error) {
+    console.error(`Alternative Critical Damage ${MODULE_VERSION} | Error in direct calculation:`, error);
+    await rollAlternativeCriticalDamageLegacy(item, actor, isCriticalHit);
+  }
 }
 
 /**
@@ -235,9 +553,9 @@ function parseWeaponDamage(item, isCriticalHit) {
     return null;
   }
 
-  console.log("Alternative Critical Damage | Weapon damage:", damage);
-  console.log("Alternative Critical Damage | Weapon traits:", traits);
-  console.log("Alternative Critical Damage | Weapon runes:", runes);
+  console.log(`Alternative Critical Damage ${MODULE_VERSION} | Weapon damage:`, damage);
+  console.log(`Alternative Critical Damage ${MODULE_VERSION} | Weapon traits:`, traits);
+  console.log(`Alternative Critical Damage ${MODULE_VERSION} | Weapon runes:`, runes);
 
   // Handle main weapon damage
   const dieType = damage.die ? damage.die.split("d")[1] : null;
@@ -372,7 +690,7 @@ function parseWeaponDamage(item, isCriticalHit) {
       // Add striking runes to the total dice count (they add additional dice)
       if (runes && typeof runes.striking === "number" && runes.striking > 0) {
         console.log(
-          "Alternative Critical Damage | Adding runes to total dice:",
+          `Alternative Critical Damage ${MODULE_VERSION} | Adding runes to total dice:`,
           runes.striking,
         );
         totalDice += runes.striking;
@@ -424,7 +742,7 @@ function parseSpellDamage(item, isCriticalHit) {
     return null;
   }
 
-  console.log("Alternative Critical Damage | Spell damage:", damage);
+  console.log(`Alternative Critical Damage ${MODULE_VERSION} | Spell damage:`, damage);
 
   // Handle spell damage instances
   for (const [key, damageInstance] of Object.entries(damage)) {
@@ -490,7 +808,7 @@ function parseSpellDamage(item, isCriticalHit) {
         }
       } catch (error) {
         console.warn(
-          "Alternative Critical Damage | Could not parse spell damage formula:",
+          `Alternative Critical Damage ${MODULE_VERSION} | Could not parse spell damage formula:`,
           damageInstance.damage,
           error,
         );
@@ -518,17 +836,17 @@ function parseSpellDamage(item, isCriticalHit) {
 }
 
 /**
- * Roll alternative critical damage with enhanced parsing
+ * Roll alternative critical damage with enhanced parsing (Legacy method)
  */
-async function rollAlternativeCriticalDamage(
+async function rollAlternativeCriticalDamageLegacy(
   item,
   actor,
   isCriticalHit = true,
 ) {
   console.log(
-    "Alternative Critical Damage | Item:",
+    `Alternative Critical Damage ${MODULE_VERSION} | Item:`,
     item.name,
-    "Type:",
+    `Type:`,
     item.type,
   );
 
@@ -568,13 +886,13 @@ async function rollAlternativeCriticalDamage(
   if (!damageFormula) {
     ui.notifications.warn(`No damage formula found for this ${item.type}`);
     console.log(
-      "Alternative Critical Damage | Item system structure:",
+      `Alternative Critical Damage ${MODULE_VERSION} | Item system structure:`,
       item.system,
     );
     return;
   }
 
-  console.log("Alternative Critical Damage | Final Formula:", damageFormula);
+  console.log(`Alternative Critical Damage ${MODULE_VERSION} | Final Formula:`, damageFormula);
 
   // Use PF2e DamageRoll if available, otherwise fall back to regular Roll
   const DamageRoll = getDamageRollClass();
@@ -611,14 +929,14 @@ async function rollAlternativeCriticalDamage(
       rollMode: game.settings.get("core", "rollMode"),
     });
 
-    console.log("Alternative Critical Damage | Roll sent to chat");
+    console.log(`Alternative Critical Damage ${MODULE_VERSION} | Roll sent to chat`);
   } catch (error) {
     console.error(
-      "Alternative Critical Damage | Error creating damage roll:",
+      `Alternative Critical Damage ${MODULE_VERSION} | Error creating damage roll:`,
       error,
     );
     ui.notifications.error("Failed to create alternative critical damage roll");
   }
 }
 
-console.log("Alternative Critical Damage | Module loaded");
+console.log(`Alternative Critical Damage ${MODULE_VERSION} | Module loaded`);
